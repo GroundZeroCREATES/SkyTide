@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SkyTide Live Tracker</title>
+<script src="cesium-config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.122.0/Build/Cesium/Cesium.js" integrity="sha384-IFLwoTsGnRm4ot5JeHMjb0qbagNVgUXXylIsi3JzlSFV3wIMB7H9amSSgm3LheG+" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.122.0/Build/Cesium/Widgets/widgets.css" integrity="sha384-ghEeMdcWWzRv/BPeUcX835vcKDGrxvROXisl/Btpv3GeekBUXTSPVcFJpI1Tcrgp" crossorigin="anonymous" />
+<style>
+  /* Neutral surfaces, one type scale, 4px spacing grid, monochrome icons.
+     Colour is reserved for data (altitude, military, ships, live). */
+  :root {
+    --bg: #0a0a0a;
+    --surface: rgba(17, 17, 17, 0.92);
+    --surface-2: #1c1c1c;
+    --surface-3: #262626;
+    --border: #262626;
+    --border-strong: #3a3a3a;
+    --text: #ededed;
+    --text-2: #a1a1a1;
+    --text-3: #6e6e6e;
+    --mil: #f05252;
+    --ship: #34c47c;
+    --live: #f05252;
+    --r: 10px; --r-sm: 6px;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #map { position: fixed; inset: 0; }
+  .cesium-viewer-bottom { display: none; }
+  button, input, select { font: inherit; color: inherit; }
+  .ic { flex: none; display: block; }
+
+  /* surfaces */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow); }
+  .label { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+  .note { color: var(--text-2); font-size: 12px; }
+  .muted { color: var(--text-2); }
+
+  /* buttons: quiet by default, filled when active */
+  .btn {
+    display: inline-flex; align-items: center; gap: var(--s2); height: 32px; padding: 0 var(--s3);
+    background: transparent; border: 0; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; white-space: nowrap;
+    transition: background .12s, color .12s;
+  }
+  .btn:hover { background: var(--surface-2); color: var(--text); }
+  .btn.on { background: var(--surface-3); color: var(--text); }
+  .btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #5b5b5b; outline-offset: 1px; }
+  .btn.solid { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+  .btn.solid:hover { background: var(--surface-3); }
+  .btn.icon { width: 32px; padding: 0; justify-content: center; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  #milBtn .dot { background: var(--text-3); }
+  #milBtn.on .dot { background: var(--mil); }
+
+  /* top bar */
+  header { position: fixed; top: var(--s3); left: var(--s3); right: var(--s3); z-index: 10; display: flex; gap: var(--s2); align-items: flex-start; pointer-events: none; }
+  header > * { pointer-events: auto; }
+  .bar { display: flex; align-items: center; gap: 2px; padding: var(--s1); }
+  .brand { display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s3) 0 var(--s2); font-weight: 600; font-size: 14px; letter-spacing: -.01em; }
+  .brand .logo { width: 22px; height: 22px; border-radius: 6px; background: var(--text); color: var(--bg); display: grid; place-items: center; }
+  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 var(--s1); }
+  .seg { display: flex; background: var(--surface-2); border-radius: 8px; padding: 2px; gap: 2px; }
+  .seg .btn { height: 28px; padding: 0 var(--s3); }
+  .search { display: flex; align-items: center; gap: var(--s2); height: 32px; padding: 0 var(--s3); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-3); margin-left: var(--s1); }
+  .search input { background: none; border: 0; outline: none; width: 200px; color: var(--text); }
+  .search input::placeholder { color: var(--text-3); }
+  .spacer { flex: 1; }
+  .select { position: relative; display: inline-flex; align-items: center; }
+  .select select { appearance: none; height: 32px; padding: 0 28px 0 34px; background: transparent; border: 0; border-radius: var(--r-sm); color: var(--text-2); cursor: pointer; }
+  .select select:hover { background: var(--surface-2); color: var(--text); }
+  .select select option { background: #161616; color: var(--text); }
+  .select > span { position: absolute; display: flex; pointer-events: none; color: var(--text-2); }
+  .select > span:first-child { left: 10px; }
+  .select > .chev { right: 8px; }
+
+  /* side panels (one at a time, top right) */
+  .panel { position: fixed; top: 64px; right: var(--s3); width: 320px; max-width: calc(100vw - 24px); z-index: 11; padding: var(--s4); display: none; max-height: calc(100vh - 250px); overflow: auto; } /* stops above the camera controls */
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s3); }
+  .panel-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+  .row { display: flex; gap: var(--s2); flex-wrap: wrap; }
+  .stack > * + * { margin-top: var(--s3); }
+
+  /* aircraft / ship details */
+  #info h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; padding-right: var(--s5); word-break: break-word; }
+  #info .sub { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; color: var(--text-2); margin: var(--s1) 0 var(--s4); }
+  #info dl { display: grid; grid-template-columns: auto 1fr; gap: var(--s2) var(--s3); margin: 0; padding-top: var(--s3); border-top: 1px solid var(--border); }
+  #info dt { color: var(--text-2); }
+  #info dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  #info .row { margin-top: var(--s4); }
+  .close { position: absolute; top: var(--s3); right: var(--s3); }
+  .tag { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 var(--s2); font-size: 11px; font-weight: 500; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); }
+  .tag .dot { background: currentColor; }
+  .tag.mil { color: var(--mil); }
+  .comms { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--border); }
+  .comms h4 { display: flex; align-items: center; gap: var(--s2); margin: 0 0 var(--s2); font-size: 13px; font-weight: 600; }
+  .comms a { color: var(--text); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+  .comms a:hover { text-decoration-color: var(--text); }
+  .airport { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); padding: 6px 0; }
+  .airport .note { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  /* station rows */
+  .st { display: flex; align-items: center; gap: var(--s3); padding: var(--s2); margin: 0 calc(-1 * var(--s2)); border-radius: var(--r-sm); cursor: pointer; }
+  .st:hover { background: var(--surface-2); }
+  .st img, .st .ph { width: 28px; height: 28px; border-radius: var(--r-sm); object-fit: cover; background: var(--surface-3); flex: none; }
+  .st .nm { flex: 1; min-width: 0; }
+  .st .nm div, .st .nm small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .st .nm small { color: var(--text-3); font-size: 12px; }
+  .st .km { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .field { display: flex; align-items: center; gap: var(--s2); height: 34px; padding: 0 var(--s3); border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3); }
+  .field input { flex: 1; background: none; border: 0; outline: none; color: var(--text); min-width: 0; }
+  #radioPanel { flex-direction: column; overflow: hidden; }
+  #radioList { overflow: auto; min-height: 0; flex: 1; margin-top: var(--s3); }
+
+  /* day & night */
+  .check { display: flex; align-items: center; gap: var(--s2); cursor: pointer; color: var(--text-2); }
+  .check input { accent-color: var(--text); width: 14px; height: 14px; margin: 0; }
+  input[type=range] { width: 100%; accent-color: var(--text); margin: 0; }
+  .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  #sunTime { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* help */
+  #help table { border-collapse: collapse; width: 100%; }
+  #help td { padding: 6px 0; vertical-align: top; border-top: 1px solid var(--border); color: var(--text-2); }
+  #help tr:first-child td { border-top: 0; }
+  #help td:first-child { white-space: nowrap; padding-right: var(--s3); color: var(--text); }
+  kbd { display: inline-block; min-width: 18px; padding: 0 5px; text-align: center; background: var(--surface-2); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; font: 11px/16px ui-monospace, monospace; color: var(--text); }
+
+  /* bottom-left: status + legend */
+  #stats { position: fixed; left: var(--s3); bottom: var(--s3); z-index: 10; padding: var(--s2) var(--s3); font-size: 12px; color: var(--text-2); max-width: calc(100vw - 80px); display: flex; align-items: center; gap: var(--s2); font-variant-numeric: tabular-nums; }
+  #stats b { color: var(--text); font-weight: 600; }
+  .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--ship); flex: none; }
+  #legend { position: fixed; left: var(--s3); bottom: 56px; z-index: 10; padding: var(--s3); width: 200px; }
+  .grad { height: 6px; border-radius: 3px; margin: var(--s2) 0 6px; background: linear-gradient(90deg, #ffd23f, #ff9f1c, #ff5ca8, #a77bff, #3fb6ff); }
+  .keys { display: flex; gap: var(--s3); margin-top: var(--s2); font-size: 12px; color: var(--text-2); }
+  .keys span { display: inline-flex; align-items: center; gap: 6px; }
+
+  /* bottom-right: camera controls */
+  #nav { position: fixed; right: var(--s3); bottom: var(--s3); z-index: 10; display: flex; flex-direction: column; padding: var(--s1); gap: 2px; }
+  #nav .btn { width: 36px; height: 36px; padding: 0; justify-content: center; }
+  #alt { position: fixed; right: 64px; bottom: var(--s3); z-index: 10; padding: var(--s2) var(--s3); font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  #alt b { color: var(--text); font-weight: 500; }
+
+  /* player */
+  #player { position: fixed; left: 50%; transform: translateX(-50%); bottom: var(--s3); z-index: 12; display: none; align-items: center; gap: var(--s3); padding: var(--s2); padding-left: var(--s2); width: min(480px, calc(100vw - 96px)); }
+  #player img, #player .ph { width: 36px; height: 36px; border-radius: var(--r-sm); object-fit: cover; background: var(--surface-3); flex: none; }
+  #player .meta { flex: 1; min-width: 0; }
+  #player .meta div { display: flex; align-items: center; gap: var(--s2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  #player .meta small { display: block; color: var(--text-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #player input[type=range] { width: 72px; }
+  .live { width: 6px; height: 6px; border-radius: 50%; background: var(--live); flex: none; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  body.playing #stats { bottom: 68px; }
+  body.playing #legend { bottom: 112px; }
+
+  #tip { position: fixed; z-index: 12; pointer-events: none; padding: var(--s1) var(--s2); font-size: 12px; display: none; box-shadow: none; }
+  #toast { position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); z-index: 13; padding: var(--s2) var(--s4); display: none; text-align: center; max-width: calc(100vw - 32px); }
+
+  /* narrow screens: icon-only toolbar, panels become bottom sheets */
+  @media (max-width: 1100px) { .tools .lbl { display: none; } .tools .btn { width: 32px; padding: 0; justify-content: center; } .tools .select select { width: 32px; padding: 0; color: transparent; } .tools .select > span:first-child { left: 8px; } .tools .select > .chev { display: none; } }
+  @media (max-width: 760px) {
+    header { flex-wrap: wrap; }
+    .search input { width: 120px; }
+    .seg .lbl { display: none; }
+    #legend, #alt { display: none; }
+    .panel { top: auto; bottom: 64px; right: 60px; left: var(--s3); width: auto; max-height: 55vh; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<header>
+  <div class="card bar">
+    <div class="brand"><span class="logo" data-i="globe" data-size="14"></span>SkyTide</div>
+    <div class="seg" id="modes">
+      <button class="btn on" data-mode="planes" data-i="plane"><span class="lbl">Planes</span></button>
+      <button class="btn" data-mode="ships" data-i="ship"><span class="lbl">Ships</span></button>
+      <button class="btn" data-mode="both"><span>Both</span></button>
+    </div>
+    <label class="search" data-i="search"><input id="search" placeholder="Search callsign, reg, ship…" aria-label="Search" /></label>
+  </div>
+  <div class="spacer"></div>
+  <div class="card bar tools">
+    <button class="btn" id="milBtn" title="Every military aircraft worldwide"><span class="dot"></span><span class="lbl">Military</span></button>
+    <button class="btn" id="locBtn" data-i="locate" title="Fly to my location"><span class="lbl">My location</span></button>
+    <span class="sep"></span>
+    <div class="select" title="Map style">
+      <span data-i="layers"></span>
+      <select id="mapStyle" aria-label="Map style">
+        <option value="satellite">Satellite</option>
+        <option value="geographical">Geographical</option>
+        <option value="street">Street</option>
+      </select>
+      <span class="chev" data-i="chevron" data-size="14"></span>
+    </div>
+    <button class="btn on" id="bordersBtn" data-i="flag" title="Country borders & names on any map"><span class="lbl">Borders</span></button>
+    <button class="btn on" id="terrainBtn" data-i="mountain" title="Real 3D mountains (Ctrl+drag to tilt)"><span class="lbl">3D terrain</span></button>
+    <button class="btn on" id="sunBtn" data-i="sun" title="Day & night from the sun's position"><span class="lbl">Day / night</span></button>
+    <button class="btn" id="radioBtn" data-i="radio" title="World radio stations"><span class="lbl">Radio</span></button>
+    <span class="sep"></span>
+    <button class="btn icon" id="helpBtn" data-i="help" title="Controls"></button>
+  </div>
+</header>
+
+<div id="info" class="card panel"></div>
+
+<div id="sunPanel" class="card panel">
+  <div class="panel-head"><h3>Day &amp; night</h3><span class="label">Sun position</span></div>
+  <div class="stack">
+    <label class="check"><input type="checkbox" id="sunOn" checked /> Shade night from the sun's real position</label>
+    <label class="check"><input type="checkbox" id="lightsOn" checked /> City lights on the night side</label>
+    <div>
+      <div id="sunTime">—</div>
+      <div id="sunWhere" class="note">—</div>
+    </div>
+    <div>
+      <input type="range" id="sunSlider" min="-24" max="24" step="0.25" value="0" aria-label="Time offset" />
+      <div class="ends"><span>−24 h</span><span>now</span><span>+24 h</span></div>
+    </div>
+    <div class="row">
+      <button class="btn solid" id="sunNow" data-i="clock">Now</button>
+      <button class="btn solid" id="sunPlay"></button>
+      <button class="btn solid" id="sunFly" data-i="globe">Sun spot</button>
+    </div>
+  </div>
+</div>
+
+<div id="radioPanel" class="card panel">
+  <div class="panel-head"><h3>World radio</h3><span class="label">Live</span></div>
+  <div class="stack">
+    <div class="note" id="radioNote">Loading stations…</div>
+    <label class="field" data-i="search"><input id="radioSearch" placeholder="Station, country, genre…" aria-label="Search stations" /></label>
+    <div class="row">
+      <button class="btn solid" id="radioRandom" data-i="shuffle">Random</button>
+      <button class="btn solid" id="radioNear" data-i="pin">Near view</button>
+      <button class="btn solid" id="radioComms" data-i="headphones">ATC &amp; marine</button>
+    </div>
+  </div>
+  <div id="radioList"></div>
+</div>
+
+<div id="help" class="card panel">
+  <div class="panel-head"><h3>Controls</h3><span class="label">Keyboard &amp; mouse</span></div>
+  <table>
+    <tr><td>Scroll · <kbd>+</kbd> <kbd>−</kbd></td><td>Zoom, all the way to space</td></tr>
+    <tr><td>Left-drag</td><td>Spin the globe</td></tr>
+    <tr><td>Right-drag</td><td>Zoom</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + drag</td><td>Tilt and turn the camera</td></tr>
+    <tr><td><kbd>W</kbd> <kbd>S</kbd></td><td>Fly forward / back</td></tr>
+    <tr><td><kbd>A</kbd> <kbd>D</kbd></td><td>Slide left / right</td></tr>
+    <tr><td><kbd>Q</kbd> <kbd>E</kbd></td><td>Up / down</td></tr>
+    <tr><td>Arrows</td><td>Look around</td></tr>
+    <tr><td><kbd>Space</kbd></td><td>Jump to space</td></tr>
+    <tr><td><kbd>H</kbd></td><td>Back home</td></tr>
+  </table>
+  <p class="note" style="margin:12px 0 0">Zoom far out, then hold <kbd>↑</kbd> to look away from Earth at the stars.</p>
+</div>
+
+<div id="player" class="card">
+  <span class="ph" id="plIcon"></span>
+  <div class="meta"><div id="plName">—</div><small id="plSub"></small></div>
+  <button class="btn icon" id="plToggle" title="Play / pause"></button>
+  <input type="range" id="plVol" min="0" max="1" step="0.05" value="0.8" aria-label="Volume" />
+  <button class="btn icon" id="plGo" data-i="globe" title="Fly to station"></button>
+  <button class="btn icon" id="plStop" data-i="x" title="Stop"></button>
+</div>
+<audio id="audio" preload="none"></audio>
+
+<div id="stats" class="card">Loading…</div>
+<div id="legend" class="card">
+  <div class="label">Altitude · ft</div>
+  <div class="grad"></div>
+  <div class="ends"><span>0</span><span>10k</span><span>20k</span><span>30k</span><span>40k+</span></div>
+  <div class="keys"><span><i class="dot" style="background:var(--mil)"></i>Military</span><span><i class="dot" style="background:var(--ship)"></i>Ship</span></div>
+</div>
+<div id="alt" class="card">Camera <b id="altVal">—</b></div>
+<div id="nav" class="card">
+  <button class="btn" id="zoomIn" data-i="plus" title="Zoom in"></button>
+  <button class="btn" id="zoomOut" data-i="minus" title="Zoom out"></button>
+  <button class="btn" id="spaceBtn" data-i="globe" title="Fly out to space"></button>
+  <button class="btn" id="northBtn" data-i="compass" title="Face north, look straight down"></button>
+</div>
+<div id="tip" class="card"></div>
+<div id="toast" class="card"></div>
+
+<script src="icons.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
