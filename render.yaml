@@ -1,0 +1,21 @@
+# Render Blueprint for SkyTide.
+# This file goes at the TOP of the GitHub repo, next to the "skytide" folder
+# (the zip already has it in the right place):
+#   render.yaml
+#   skytide/server.js, skytide/package.json, skytide/public/...
+# In Render: New > Blueprint > pick the repo > Deploy Blueprint.
+# Add later under the service's Environment tab (both optional):
+#   ALLOWED_HOSTS  your custom domain(s), comma separated, e.g. skytide.is-a.dev
+#   AISSTREAM_KEY  free key from aisstream.io for worldwide ships
+services:
+  - type: web
+    name: skytide
+    runtime: node
+    plan: free
+    rootDir: skytide              # the app lives in the skytide folder
+    buildCommand: npm run build   # just prints a message: no dependencies to install
+    startCommand: npm start       # runs node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

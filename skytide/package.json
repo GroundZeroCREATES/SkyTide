@@ -5,9 +5,10 @@
   "description": "Live flights, ships and world radio on a 3D globe",
   "main": "server.js",
   "scripts": {
+    "build": "echo SkyTide has no build step",
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   }
 }

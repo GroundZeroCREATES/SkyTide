@@ -329,6 +329,8 @@ let countries = null;
 
 const server = http.createServer(async (req, res) => {
   if (req.method !== "GET" && req.method !== "HEAD") { res.writeHead(405, { Allow: "GET, HEAD", ...SECURITY_HEADERS }); return res.end(); }
+  // Hosting health checks arrive on an internal address, so answer them before the host check (no data exposed)
+  if (req.url === "/healthz") { res.writeHead(200, { "Content-Type": "text/plain", ...SECURITY_HEADERS }); return res.end("ok"); }
   const host = String(req.headers.host || "").toLowerCase().replace(/:\d+$/, "");
   if (!ALLOWED_HOSTS.has(host)) { res.writeHead(421, SECURITY_HEADERS); return res.end("Unknown host"); }
   let url;
